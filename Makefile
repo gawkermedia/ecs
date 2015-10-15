@@ -18,4 +18,4 @@ build:
 
 deps:
 	@if [ ! -d "$(GOPATH)/src/$(sdk_dest)" ]; then git clone https://$(sdk_source) $(GOPATH)/src/$(sdk_dest); fi
-	@cd $(GOPATH)/src/$(sdk_dest) && git pull && go build && go install
+	@cd $(GOPATH)/src/$(sdk_dest) && git pull && go ./... && go build && go install
