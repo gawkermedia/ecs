@@ -13,6 +13,7 @@ install:
 	@go install
 
 build:
+	@make deps
 	@go build
 
 deps:
