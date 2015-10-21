@@ -52,7 +52,9 @@ func containerDef(family *string, containerPort *int64, hostPort *int64, image *
 	c.Cpu = cpu
 	c.Memory = memory
 	c.Essential = aws.Bool(essential)
-	c.PortMappings = []*ecs.PortMapping{portMapping}
+	if *hostPort != 0 {
+		c.PortMappings = []*ecs.PortMapping{portMapping}
+	}
 	c.MountPoints = []*ecs.MountPoint{mountPoint}
 	return &c
 }
