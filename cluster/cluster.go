@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"flag"
+
 	"github.com/aws/aws-sdk-go/service/ecs"
 	"github.com/gawkermedia/ecs/cli"
 )
@@ -12,6 +13,7 @@ var cliClusterName string
 
 // CLI params END
 
+// ListClusters List ECS clusters
 func ListClusters(svc *ecs.ECS, maxResults *int64) (*ecs.ListClustersOutput, error) {
 	params := &ecs.ListClustersInput{
 		MaxResults: maxResults,
@@ -30,7 +32,7 @@ func cliListClustersParams(args []string) *flag.FlagSet {
 }
 
 func cliListClusters(svc *ecs.ECS, args []string) ([]*string, error) {
-	cliListClustersParams(args).Parse(args)
+	err := cliListClustersParams(args).Parse(args)
 	resp, err := ListClusters(svc, &cliMaxResults)
 	if err != nil {
 		return nil, err
@@ -38,6 +40,7 @@ func cliListClusters(svc *ecs.ECS, args []string) ([]*string, error) {
 	return resp.ClusterArns, nil
 }
 
+// CreateCluster Creates a new ECS cluster
 func CreateCluster(svc *ecs.ECS, name *string) (*ecs.CreateClusterOutput, error) {
 	params := &ecs.CreateClusterInput{
 		ClusterName: name,
@@ -56,7 +59,7 @@ func cliClusterNameParams(args []string) *flag.FlagSet {
 }
 
 func cliCreateCluster(svc *ecs.ECS, args []string) ([]*string, error) {
-	cliClusterNameParams(args).Parse(args)
+	err := cliClusterNameParams(args).Parse(args)
 	resp, err := CreateCluster(svc, &cliClusterName)
 	if err != nil {
 		return nil, err
@@ -64,6 +67,7 @@ func cliCreateCluster(svc *ecs.ECS, args []string) ([]*string, error) {
 	return []*string{resp.Cluster.ClusterName}, nil
 }
 
+// DeleteCluster Removes an ECS cluster
 func DeleteCluster(svc *ecs.ECS, name *string) (*ecs.DeleteClusterOutput, error) {
 	params := &ecs.DeleteClusterInput{
 		Cluster: name,
@@ -85,23 +89,24 @@ func cliDeleteCluster(svc *ecs.ECS, args []string) ([]*string, error) {
 }
 
 var commands = map[string]cli.Command{
-	"list": cli.Command{
+	"list": {
 		cliListClusters,
 		"Returns a list of existing clusters.",
 		cliListClustersParams,
 	},
-	"create": cli.Command{
+	"create": {
 		cliCreateCluster,
 		"Creates a new Amazon ECS cluster.",
 		cliClusterNameParams,
 	},
-	"delete": cli.Command{
+	"delete": {
 		cliDeleteCluster,
 		"Deletes the specified cluster. You must deregister all container instances from this cluster before you may delete it.",
 		cliClusterNameParams,
 	},
 }
 
+// Run Main entry point, which runs a command or display a help message.
 func Run(command string, args []string) ([]*string, error) {
 	return cli.Run(command, commands, args)
 }

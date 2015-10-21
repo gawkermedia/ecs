@@ -2,11 +2,12 @@ package main
 
 import (
 	"fmt"
+	"os"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/defaults"
 	"github.com/gawkermedia/ecs/cluster"
 	"github.com/gawkermedia/ecs/task"
-	"os"
 )
 
 var az = "us-east-1"
@@ -22,7 +23,7 @@ func printHelp() {
 func main() {
 	defaults.DefaultConfig.Region = aws.String(az)
 
-	var cmd string = "help"
+	cmd := "help"
 	if len(os.Args) > 1 {
 		cmd = os.Args[1]
 		if cmd == "help" && len(os.Args) == 3 {
@@ -31,7 +32,7 @@ func main() {
 	}
 
 	var ret []*string
-	var err error = nil
+	var err error
 
 	switch {
 	case cmd == "cluster":

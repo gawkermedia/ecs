@@ -3,13 +3,14 @@ package task
 import (
 	"errors"
 	"flag"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/ecs"
 	"github.com/gawkermedia/ecs/cli"
-	"strconv"
-	"strings"
-	"time"
 )
 
 var cliClusterName string
@@ -29,7 +30,7 @@ var cliMountPath string
 var cliSourceVolume string
 var cliMountReadOnly bool
 var cliImage string
-var cliCpu int64
+var cliCPU int64
 var cliMemory int64
 var cliEssential bool
 
@@ -56,7 +57,8 @@ func containerDef(family *string, containerPort *int64, hostPort *int64, image *
 	return &c
 }
 
-func TaskDef(family *string, containerPort *int64, hostPort *int64, image *string, cpu *int64, memory *int64, essential bool) *ecs.RegisterTaskDefinitionInput {
+// Definition Task definition
+func Definition(family *string, containerPort *int64, hostPort *int64, image *string, cpu *int64, memory *int64, essential bool) *ecs.RegisterTaskDefinitionInput {
 	return &ecs.RegisterTaskDefinitionInput{
 		ContainerDefinitions: []*ecs.ContainerDefinition{
 			containerDef(family, containerPort, hostPort, image, cpu, memory, essential),
@@ -70,6 +72,7 @@ func TaskDef(family *string, containerPort *int64, hostPort *int64, image *strin
 	}
 }
 
+// RegisterTask Register a new version of the task definition
 func RegisterTask(svc *ecs.ECS, params *ecs.RegisterTaskDefinitionInput) (*ecs.RegisterTaskDefinitionOutput, error) {
 	return svc.RegisterTaskDefinition(params)
 }
@@ -83,20 +86,20 @@ func cliRegisterTaskParams(args []string) *flag.FlagSet {
 	c.StringVar(&cliSourceVolume, "source-volume", "", "The name of the volume to mount.")
 	c.BoolVar(&cliMountReadOnly, "mount-read-only", false, "If this value is true, the container has read-only access to the volume. If this value is false, then the container can write to the volume. The default value is false.")
 	c.StringVar(&cliImage, "image", "", "The image used to start a container. This string is passed directly to the Docker daemon. Images in the Docker Hub registry are available by default. Other repositories are specified with repository-url/image:tag.")
-	c.Int64Var(&cliCpu, "cpu", 1024, "The number of cpu units reserved for the container. A container instance has 1,024 cpu units for every CPU core. This parameter specifies the minimum amount of CPU to reserve for a container, and containers share unallocated CPU units with other containers on the instance with the same ratio as their allocated amount.")
+	c.Int64Var(&cliCPU, "cpu", 1024, "The number of cpu units reserved for the container. A container instance has 1,024 cpu units for every CPU core. This parameter specifies the minimum amount of CPU to reserve for a container, and containers share unallocated CPU units with other containers on the instance with the same ratio as their allocated amount.")
 	c.Int64Var(&cliMemory, "memory", 512, "The number of MiB of memory reserved for the container. If your container attempts to exceed the memory allocated here, the container is killed.")
 	c.BoolVar(&cliEssential, "essential", true, "If the essential parameter of a container is marked as true, the failure of that container will stop the task. If the essential parameter of a container is marked as false, then its failure will not affect the rest of the containers in a task. If this parameter is omitted, a container is assumed to be essential.")
 	return c
 }
 
 func cliRegisterTask(svc *ecs.ECS, args []string) ([]*string, error) {
-	cliRegisterTaskParams(args).Parse(args)
-	params := TaskDef(
+	err := cliRegisterTaskParams(args).Parse(args)
+	params := Definition(
 		&cliFamily,
 		&cliContainerPort,
 		&cliHostPort,
 		&cliImage,
-		&cliCpu,
+		&cliCPU,
 		&cliMemory,
 		cliEssential)
 	resp, err := RegisterTask(svc, params)
@@ -106,7 +109,7 @@ func cliRegisterTask(svc *ecs.ECS, args []string) ([]*string, error) {
 	return []*string{resp.TaskDefinition.TaskDefinitionArn}, err
 }
 
-// Returns a list of tasks for a specified cluster.
+// ListTasks Returns a list of tasks for a specified cluster.
 func ListTasks(svc *ecs.ECS, params *ecs.ListTasksInput) (*ecs.ListTasksOutput, error) {
 	return svc.ListTasks(params)
 }
@@ -124,7 +127,7 @@ func cliListTasksParams(args []string) *flag.FlagSet {
 }
 
 func cliListTasks(svc *ecs.ECS, args []string) ([]*string, error) {
-	cliListTasksParams(args).Parse(args)
+	err := cliListTasksParams(args).Parse(args)
 	params := &ecs.ListTasksInput{
 		Cluster:           &cliClusterName,
 		ContainerInstance: cli.String(cliContainerInstance),
@@ -140,6 +143,7 @@ func cliListTasks(svc *ecs.ECS, args []string) ([]*string, error) {
 	return resp.TaskArns, err
 }
 
+// DescribeTasks Describes an ECS task
 func DescribeTasks(svc *ecs.ECS, taskArns []*string, cluster *string) (*ecs.DescribeTasksOutput, error) {
 	if len(taskArns) == 0 {
 		return nil, errors.New("Tasks can not be blank")
@@ -163,7 +167,7 @@ func cliDescribeTasksParams(args []string) *flag.FlagSet {
 }
 
 func cliDescribeTasks(svc *ecs.ECS, args []string) ([]*string, error) {
-	cliDescribeTasksParams(args).Parse(args)
+	err := cliDescribeTasksParams(args).Parse(args)
 	resp, err := DescribeTasks(
 		svc,
 		aws.StringSlice(strings.Split(cliTasks, ",")),
@@ -176,13 +180,14 @@ func cliDescribeTasks(svc *ecs.ECS, args []string) ([]*string, error) {
 	if fail != nil {
 		return nil, fail
 	}
-	var ret []*string = make([]*string, len(resp.Tasks))
+	var ret = make([]*string, len(resp.Tasks))
 	for k := range resp.Tasks {
 		ret[k] = resp.Tasks[k].TaskArn
 	}
 	return ret, err
 }
 
+// StartTask Starts a new task in ECS
 func StartTask(svc *ecs.ECS, taskDef *string, containerInstances []*string, cluster *string, startedBy *string, overrides *ecs.TaskOverride) (*ecs.StartTaskOutput, error) {
 	params := &ecs.StartTaskInput{
 		Cluster:            cluster,
@@ -198,6 +203,7 @@ func StartTask(svc *ecs.ECS, taskDef *string, containerInstances []*string, clus
 	return resp, err
 }
 
+// StartWait Starts a new task a waits until it started successfully.
 func StartWait(svc *ecs.ECS, maxTries *int, timeout *int64, taskDef *string, containerInstances []*string, cluster *string, startedBy *string, overrides *ecs.TaskOverride) (*ecs.DescribeTasksOutput, error) {
 	tries := 0
 	counter := 0
@@ -216,7 +222,7 @@ func StartWait(svc *ecs.ECS, maxTries *int, timeout *int64, taskDef *string, con
 	if fail != nil {
 		return nil, fail
 	}
-	var tasks []*string = make([]*string, len(start.Tasks))
+	var tasks = make([]*string, len(start.Tasks))
 	for i, v := range start.Tasks {
 		tasks[i] = v.TaskArn
 	}
@@ -258,7 +264,7 @@ func cliStartWaitParams(args []string) *flag.FlagSet {
 }
 
 func cliStartWait(svc *ecs.ECS, args []string) ([]*string, error) {
-	cliStartWaitParams(args).Parse(args)
+	err := cliStartWaitParams(args).Parse(args)
 	containerInstances := aws.StringSlice(strings.Split(cliContainerInstance, ","))
 	resp, err := StartWait(
 		svc,
@@ -277,7 +283,7 @@ func cliStartWait(svc *ecs.ECS, args []string) ([]*string, error) {
 	if fail != nil {
 		return nil, fail
 	}
-	var ret []*string = make([]*string, len(resp.Tasks))
+	var ret = make([]*string, len(resp.Tasks))
 	for k := range resp.Tasks {
 		ret[k] = resp.Tasks[k].TaskArn
 	}
@@ -293,7 +299,7 @@ func cliStartWait(svc *ecs.ECS, args []string) ([]*string, error) {
 	if insfail != nil {
 		return nil, insfail
 	}
-	var ec2Instances []*string = make([]*string, len(ins.ContainerInstances))
+	var ec2Instances = make([]*string, len(ins.ContainerInstances))
 	for i, v := range ins.ContainerInstances {
 		ec2Instances[i] = v.Ec2InstanceId
 	}
@@ -306,7 +312,7 @@ func cliStartWait(svc *ecs.ECS, args []string) ([]*string, error) {
 	if dnserr != nil {
 		return ret, dnserr
 	}
-	var result []*string = make([]*string, len(ret)+len(dns.Reservations))
+	var result = make([]*string, len(ret)+len(dns.Reservations))
 	copy(result, ret)
 	for _, r := range dns.Reservations {
 		for i, v := range r.Instances {
@@ -326,7 +332,7 @@ func cliStartTaskParams(args []string) *flag.FlagSet {
 }
 
 func cliStartTask(svc *ecs.ECS, args []string) ([]*string, error) {
-	cliStartTaskParams(args).Parse(args)
+	err := cliStartTaskParams(args).Parse(args)
 	resp, err := StartTask(
 		svc,
 		&cliTaskDef,
@@ -342,13 +348,14 @@ func cliStartTask(svc *ecs.ECS, args []string) ([]*string, error) {
 	if fail != nil {
 		return nil, fail
 	}
-	var ret []*string = make([]*string, len(resp.Tasks))
+	var ret = make([]*string, len(resp.Tasks))
 	for k := range resp.Tasks {
 		ret[k] = resp.Tasks[k].TaskArn
 	}
 	return ret, nil
 }
 
+// StopTask Stops a task
 func StopTask(svc *ecs.ECS, task *string, cluster *string) (*ecs.StopTaskOutput, error) {
 	params := &ecs.StopTaskInput{
 		Task:    task,
@@ -369,7 +376,7 @@ func cliStopTaskParams(args []string) *flag.FlagSet {
 }
 
 func cliStopTask(svc *ecs.ECS, args []string) ([]*string, error) {
-	cliStopTaskParams(args).Parse(args)
+	err := cliStopTaskParams(args).Parse(args)
 	resp, err := StopTask(
 		svc,
 		&cliTaskDef,
@@ -382,38 +389,39 @@ func cliStopTask(svc *ecs.ECS, args []string) ([]*string, error) {
 }
 
 var commands = map[string]cli.Command{
-	"desc": cli.Command{
+	"desc": {
 		cliDescribeTasks,
 		"Describes a specified task or tasks.",
 		cliDescribeTasksParams,
 	},
-	"list": cli.Command{
+	"list": {
 		cliListTasks,
 		"Returns a list of tasks for a specified cluster. You can filter the results by family name, by a particular container instance, or by the desired status of the task with the family , containerInstance , and desiredStatus parameters.",
 		cliListTasksParams,
 	},
-	"register": cli.Command{
+	"register": {
 		cliRegisterTask,
 		"Registers a new task definition from the supplied family and containerDefinitions.",
 		cliRegisterTaskParams,
 	},
-	"start": cli.Command{
+	"start": {
 		cliStartTask,
 		"Starts a new task from the specified task definition on the specified container instance or instances. To use the default Amazon ECS scheduler to place your task, use run-task instead.",
 		cliStartTaskParams,
 	},
-	"start-wait": cli.Command{
+	"start-wait": {
 		cliStartWait,
 		"Starts a new task from the specified task definition on the specified container instance or instances. It's blocks until the specified task starts and print its data.",
 		cliStartWaitParams,
 	},
-	"stop": cli.Command{
+	"stop": {
 		cliStopTask,
 		"Stops a running task.",
 		cliStopTaskParams,
 	},
 }
 
+// Run Main entry point, which runs a command or display a help message.
 func Run(command string, args []string) ([]*string, error) {
 	return cli.Run(command, commands, args)
 }
