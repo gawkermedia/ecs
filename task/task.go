@@ -16,6 +16,7 @@ import (
 var cliClusterName string
 var cliContainerInstance string
 var cliDesiredStatus string
+var cliStatus string
 var cliFamily string
 var cliMaxResults int64
 var cliMaxTries int
@@ -33,8 +34,9 @@ var cliImage string
 var cliCPU int64
 var cliMemory int64
 var cliEssential bool
+var cliLinks string
 
-func containerDef(family *string, containerPort *int64, hostPort *int64, image *string, cpu *int64, memory *int64, essential bool) *ecs.ContainerDefinition {
+func containerDef(family *string, containerPort *int64, hostPort *int64, image *string, cpu *int64, memory *int64, essential bool, links []*string) *ecs.ContainerDefinition {
 	portMapping := &ecs.PortMapping{
 		ContainerPort: containerPort,
 		HostPort:      hostPort,
@@ -52,6 +54,7 @@ func containerDef(family *string, containerPort *int64, hostPort *int64, image *
 	c.Cpu = cpu
 	c.Memory = memory
 	c.Essential = aws.Bool(essential)
+	c.Links = links
 	if *hostPort != 0 {
 		c.PortMappings = []*ecs.PortMapping{portMapping}
 	}
@@ -60,10 +63,10 @@ func containerDef(family *string, containerPort *int64, hostPort *int64, image *
 }
 
 // Definition Task definition
-func Definition(family *string, containerPort *int64, hostPort *int64, image *string, cpu *int64, memory *int64, essential bool) *ecs.RegisterTaskDefinitionInput {
+func Definition(family *string, containerPort *int64, hostPort *int64, image *string, cpu *int64, memory *int64, essential bool, links []*string) *ecs.RegisterTaskDefinitionInput {
 	return &ecs.RegisterTaskDefinitionInput{
 		ContainerDefinitions: []*ecs.ContainerDefinition{
-			containerDef(family, containerPort, hostPort, image, cpu, memory, essential),
+			containerDef(family, containerPort, hostPort, image, cpu, memory, essential, links),
 		},
 		Family: family,
 		Volumes: []*ecs.Volume{
@@ -91,6 +94,7 @@ func cliRegisterTaskParams(args []string) *flag.FlagSet {
 	c.Int64Var(&cliCPU, "cpu", 1024, "The number of cpu units reserved for the container. A container instance has 1,024 cpu units for every CPU core. This parameter specifies the minimum amount of CPU to reserve for a container, and containers share unallocated CPU units with other containers on the instance with the same ratio as their allocated amount.")
 	c.Int64Var(&cliMemory, "memory", 512, "The number of MiB of memory reserved for the container. If your container attempts to exceed the memory allocated here, the container is killed.")
 	c.BoolVar(&cliEssential, "essential", true, "If the essential parameter of a container is marked as true, the failure of that container will stop the task. If the essential parameter of a container is marked as false, then its failure will not affect the rest of the containers in a task. If this parameter is omitted, a container is assumed to be essential.")
+	c.StringVar(&cliLinks, "links", "", "A list of links for the container. Each link entry should be in the form of `container_name:alias.`")
 	return c
 }
 
@@ -103,7 +107,8 @@ func cliRegisterTask(svc *ecs.ECS, args []string) ([]*string, error) {
 		&cliImage,
 		&cliCPU,
 		&cliMemory,
-		cliEssential)
+		cliEssential,
+		aws.StringSlice(strings.Split(cliLinks, ",")))
 	resp, err := RegisterTask(svc, params)
 	if err != nil {
 		return nil, err
@@ -143,6 +148,35 @@ func cliListTasks(svc *ecs.ECS, args []string) ([]*string, error) {
 		return nil, err
 	}
 	return resp.TaskArns, err
+}
+
+// ListTaskDefs Returns a list of task definitions that are registered to your account. You can filter the results by family name with the family parameter or by status with the status parameter.
+func ListTaskDefs(svc *ecs.ECS, familyPrefix *string, status *string) (*ecs.ListTaskDefinitionsOutput, error) {
+	params := &ecs.ListTaskDefinitionsInput{
+		FamilyPrefix: familyPrefix,
+		Status:       status,
+	}
+	resp, err := svc.ListTaskDefinitions(params)
+	if err != nil {
+		return resp, err
+	}
+	return resp, nil
+}
+
+func cliListTaskDefsParams(args []string) *flag.FlagSet {
+	var c = cli.Get("", args)
+	c.StringVar(&cliFamily, "family", "", "The full family name with which to filter the list-task-definitions results. Specifying a family limits the listed task definitions to task definition revisions that belong to that family.")
+	c.StringVar(&cliStatus, "status", "ACTIVE", "The task definition status with which to filter the list-task-definitions results. By default, only ACTIVE task definitions are listed. By setting this parameter to INACTIVE , you can view task definitions that are INACTIVE as long as an active task or service still references them. Possible values: ACTIVE, INACTIVE")
+	return c
+}
+
+func cliListTaskDefs(svc *ecs.ECS, args []string) ([]*string, error) {
+	err := cliListTaskDefsParams(args).Parse(args)
+	resp, err := ListTaskDefs(svc, cli.String(cliFamily), cli.String(cliStatus))
+	if err != nil {
+		return nil, err
+	}
+	return resp.TaskDefinitionArns, nil
 }
 
 // DescribeTasks Describes an ECS task
@@ -400,6 +434,11 @@ var commands = map[string]cli.Command{
 		cliListTasks,
 		"Returns a list of tasks for a specified cluster. You can filter the results by family name, by a particular container instance, or by the desired status of the task with the family , containerInstance , and desiredStatus parameters.",
 		cliListTasksParams,
+	},
+	"definitions": {
+		cliListTaskDefs,
+		"Returns a list of task definitions that are registered to your account. You can filter the results by family name with the family parameter or by status with the status parameter.",
+		cliListTaskDefsParams,
 	},
 	"register": {
 		cliRegisterTask,
