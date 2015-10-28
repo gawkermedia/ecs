@@ -73,6 +73,11 @@ func Run(command string, commands map[string]Command, args []string) ([]*string,
 	}
 
 	if cmd, ok := commands[input]; ok {
+		if len(args) > 1 && args[1] == "help" {
+			fmt.Fprintf(os.Stderr, "\n  # "+input+"\n  "+cmd.Desc+"\n\n  Parameters:\n")
+			cmd.Help(args).PrintDefaults()
+			return nil, nil
+		}
 		ret, err := cmd.Cmd(svc, args[1:]) //func(*ecs.ECS, []string) ([]*string, error))(svc, args[1:])
 		return ret, err
 	}
