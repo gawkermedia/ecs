@@ -99,7 +99,11 @@ func cliRegisterTaskParams(args []string) *flag.FlagSet {
 }
 
 func cliRegisterTask(svc *ecs.ECS, args []string) ([]*string, error) {
+	var links []*string
 	err := cliRegisterTaskParams(args).Parse(args)
+	if cliLinks != "" {
+		links = aws.StringSlice(strings.Split(cliLinks, ","))
+	}
 	params := Definition(
 		&cliFamily,
 		&cliContainerPort,
@@ -108,7 +112,7 @@ func cliRegisterTask(svc *ecs.ECS, args []string) ([]*string, error) {
 		&cliCPU,
 		&cliMemory,
 		cliEssential,
-		aws.StringSlice(strings.Split(cliLinks, ",")))
+		links)
 	resp, err := RegisterTask(svc, params)
 	if err != nil {
 		return nil, err
