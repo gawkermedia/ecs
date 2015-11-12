@@ -35,6 +35,7 @@ var cliCPU int64
 var cliMemory int64
 var cliEssential bool
 var cliLinks string
+var cliWithConsul bool
 
 func containerDef(family *string, containerPort *int64, hostPort *int64, image *string, cpu *int64, memory *int64, essential bool, links []*string) *ecs.ContainerDefinition {
 	portMapping := &ecs.PortMapping{
@@ -62,16 +63,127 @@ func containerDef(family *string, containerPort *int64, hostPort *int64, image *
 	return &c
 }
 
-// Definition Task definition
-func Definition(family *string, containerPort *int64, hostPort *int64, image *string, cpu *int64, memory *int64, essential bool, links []*string) *ecs.RegisterTaskDefinitionInput {
-	return &ecs.RegisterTaskDefinitionInput{
-		ContainerDefinitions: []*ecs.ContainerDefinition{
-			containerDef(family, containerPort, hostPort, image, cpu, memory, essential, links),
+func consulDefinition() *ecs.ContainerDefinition {
+	c := ecs.ContainerDefinition{}
+	c.Name = aws.String("kinja-consul-agent")
+	c.Hostname = aws.String("i-5be8158f")
+	c.Image = aws.String("progrium/consul")
+	c.Cpu = aws.Int64(156)
+	c.Memory = aws.Int64(256)
+	c.Essential = aws.Bool(true)
+	c.PortMappings = []*ecs.PortMapping{
+		&ecs.PortMapping{
+			ContainerPort: aws.Int64(8301),
+			HostPort:      aws.Int64(8301),
+			Protocol:      aws.String("tcp"),
 		},
-		Family: family,
+		&ecs.PortMapping{
+			ContainerPort: aws.Int64(8301),
+			HostPort:      aws.Int64(8301),
+			Protocol:      aws.String("udp"),
+		},
+		&ecs.PortMapping{
+			ContainerPort: aws.Int64(8400),
+			HostPort:      aws.Int64(8400),
+			Protocol:      aws.String("tcp"),
+		},
+		&ecs.PortMapping{
+			ContainerPort: aws.Int64(8500),
+			HostPort:      aws.Int64(8500),
+			Protocol:      aws.String("tcp"),
+		},
+		&ecs.PortMapping{
+			ContainerPort: aws.Int64(53),
+			HostPort:      aws.Int64(53),
+			Protocol:      aws.String("udp"),
+		},
+	}
+	c.MountPoints = []*ecs.MountPoint{
+		&ecs.MountPoint{
+			ContainerPath: aws.String("/data"),
+			SourceVolume:  aws.String("consul-vol"),
+			ReadOnly:      aws.Bool(false),
+		},
+		&ecs.MountPoint{
+			ContainerPath: aws.String("/var/run/docker.sock"),
+			SourceVolume:  aws.String("consul-socket"),
+			ReadOnly:      aws.Bool(false),
+		},
+		&ecs.MountPoint{
+			ContainerPath: aws.String("/etc/consul"),
+			SourceVolume:  aws.String("consul-config"),
+			ReadOnly:      aws.Bool(false),
+		},
+	}
+
+	c.Command = []*string{
+		aws.String("--join 172.16.41.29"),
+		aws.String("--advertise  $(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)"),
+		aws.String("-dc us-east-1a"),
+		aws.String("--config-file /etc/consul/consul.json"),
+	}
+	return &c
+}
+
+func registratorDefinition() *ecs.ContainerDefinition {
+	c := ecs.ContainerDefinition{}
+	c.Name = aws.String("kinja-consul-registrator")
+	c.Hostname = aws.String("i-5be8158f")
+	c.Image = aws.String("gliderlabs/registrator:latest")
+	c.Cpu = aws.Int64(100)
+	c.Memory = aws.Int64(64)
+	c.Essential = aws.Bool(true)
+	c.MountPoints = []*ecs.MountPoint{
+		&ecs.MountPoint{
+			ContainerPath: aws.String("/tmp/docker.sock"),
+			SourceVolume:  aws.String("consul-socket"),
+			ReadOnly:      aws.Bool(false),
+		},
+	}
+
+	c.Command = []*string{
+		aws.String("--ip  $(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)"),
+		aws.String("consul://$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4):8500"),
+	}
+	return &c
+}
+
+// Definition Task definition
+func Definition(family *string, containerPort *int64, hostPort *int64, image *string, cpu *int64, memory *int64, essential bool, withConsul bool, links []*string) *ecs.RegisterTaskDefinitionInput {
+	size := 1
+	if withConsul {
+		size = 3
+	}
+	defs := make([]*ecs.ContainerDefinition, size)
+	defs[0] = containerDef(family, containerPort, hostPort, image, cpu, memory, essential, links)
+	if withConsul {
+		defs[1] = consulDefinition()
+		defs[2] = registratorDefinition()
+	}
+	return &ecs.RegisterTaskDefinitionInput{
+		ContainerDefinitions: defs,
+		Family:               family,
 		Volumes: []*ecs.Volume{
 			{
 				Name: aws.String(*family + "-vol"),
+			},
+			{
+				Name: aws.String("consul-vol"),
+				Host: &ecs.HostVolumeProperties{
+					SourcePath: aws.String("/opt/consul"),
+				},
+			},
+			{
+				Name: aws.String("consul-socket"),
+				Host: &ecs.HostVolumeProperties{
+					SourcePath: aws.String("/var/run/docker.sock"),
+				},
+			},
+			{
+				Name: aws.String("consul-config"),
+				Host: &ecs.HostVolumeProperties{
+					SourcePath: aws.String("/etc/consul"),
+				},
 			},
 		},
 	}
@@ -91,10 +203,11 @@ func cliRegisterTaskParams(args []string) *flag.FlagSet {
 	c.StringVar(&cliSourceVolume, "source-volume", "", "The name of the volume to mount.")
 	c.BoolVar(&cliMountReadOnly, "mount-read-only", false, "If this value is true, the container has read-only access to the volume. If this value is false, then the container can write to the volume. The default value is false.")
 	c.StringVar(&cliImage, "image", "", "The image used to start a container. This string is passed directly to the Docker daemon. Images in the Docker Hub registry are available by default. Other repositories are specified with repository-url/image:tag.")
-	c.Int64Var(&cliCPU, "cpu", 1024, "The number of cpu units reserved for the container. A container instance has 1,024 cpu units for every CPU core. This parameter specifies the minimum amount of CPU to reserve for a container, and containers share unallocated CPU units with other containers on the instance with the same ratio as their allocated amount.")
+	c.Int64Var(&cliCPU, "cpu", 512, "The number of cpu units reserved for the container. A container instance has 1,024 cpu units for every CPU core. This parameter specifies the minimum amount of CPU to reserve for a container, and containers share unallocated CPU units with other containers on the instance with the same ratio as their allocated amount.")
 	c.Int64Var(&cliMemory, "memory", 512, "The number of MiB of memory reserved for the container. If your container attempts to exceed the memory allocated here, the container is killed.")
 	c.BoolVar(&cliEssential, "essential", true, "If the essential parameter of a container is marked as true, the failure of that container will stop the task. If the essential parameter of a container is marked as false, then its failure will not affect the rest of the containers in a task. If this parameter is omitted, a container is assumed to be essential.")
 	c.StringVar(&cliLinks, "links", "", "A list of links for the container. Each link entry should be in the form of `container_name:alias.`")
+	c.BoolVar(&cliWithConsul, "with-consul", false, "Add consul and registrator to the container or not. Default `false`")
 	return c
 }
 
@@ -112,6 +225,7 @@ func cliRegisterTask(svc *ecs.ECS, args []string) ([]*string, error) {
 		&cliCPU,
 		&cliMemory,
 		cliEssential,
+		cliWithConsul,
 		links)
 	resp, err := RegisterTask(svc, params)
 	if err != nil {
