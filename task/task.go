@@ -118,7 +118,8 @@ func consulDefinition() *ecs.ContainerDefinition {
 
 	c.Command = []*string{
 		aws.String("--join 172.16.41.29"),
-		aws.String("--advertise  $(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)"),
+		//aws.String("--advertise  $(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)"),
+		aws.String("--advertise 172.16.34.239"),
 		aws.String("-dc us-east-1a"),
 		aws.String("--config-file /etc/consul/consul.json"),
 	}
@@ -142,8 +143,9 @@ func registratorDefinition() *ecs.ContainerDefinition {
 	}
 
 	c.Command = []*string{
-		aws.String("--ip  $(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)"),
-		aws.String("consul://$(curl -s http://169.254.169.254/latest/meta-data/local-ipv4):8500"),
+		//aws.String("--ip  $(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)"),
+		aws.String("--ip 172.16.34.239"),
+		aws.String("consul://172.16.34.239:8500"),
 	}
 	return &c
 }
