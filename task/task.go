@@ -143,8 +143,8 @@ func registratorDefinition() *ecs.ContainerDefinition {
 	}
 
 	c.Command = []*string{
-		//aws.String("--ip  $(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)"),
-		aws.String("--ip 172.16.34.239"),
+		//aws.String("-ip  $(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)"),
+		aws.String("-ip=172.16.34.239"),
 		aws.String("consul://172.16.34.239:8500"),
 	}
 	return &c
@@ -168,6 +168,9 @@ func Definition(family *string, containerPort *int64, hostPort *int64, image *st
 		Volumes: []*ecs.Volume{
 			{
 				Name: aws.String(*family + "-vol"),
+				Host: &ecs.HostVolumeProperties{
+					SourcePath: aws.String("/tmp"),
+				},
 			},
 			{
 				Name: aws.String("consul-vol"),
