@@ -1,6 +1,5 @@
 
-sdk_dest = github.com/aws/aws-sdk-go
-sdk_source = github.com/gawkermedia/aws-sdk-go
+sdk_dep = github.com/aws/aws-sdk-go
 
 help:
 	@echo "Please use \`make <target>' where <target> is one of"
@@ -17,5 +16,5 @@ build:
 	@go build
 
 deps:
-	@if [ ! -d "$(GOPATH)/src/$(sdk_dest)" ]; then git clone https://$(sdk_source) $(GOPATH)/src/$(sdk_dest); fi
-	@cd $(GOPATH)/src/$(sdk_dest) && git pull && go get ./... && go build && go install
+	@if [ ! -d "$(GOPATH)/src/$(sdk_dep)" ]; then git clone https://$(sdk_dep) $(GOPATH)/src/$(sdk_dep); fi
+	@cd $(GOPATH)/src/$(sdk_dep) && git pull && go get ./... && go build && go install
