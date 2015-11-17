@@ -11,6 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/aws/aws-sdk-go/service/ecs"
 	"github.com/gawkermedia/ecs/cli"
+	"github.com/gawkermedia/ecs/sess"
 )
 
 var cliClusterName string
@@ -36,6 +37,48 @@ var cliMemory int64
 var cliEssential bool
 var cliLinks string
 var cliWithConsul bool
+var cliConsulServerInstance string
+
+// describeEc2Instances Describes EC2 instances by container istance ID
+func describeEc2Instances(svc *ecs.ECS, cluster *string, containerInstances []*string) (*ec2.DescribeInstancesOutput, error) {
+
+	params := &ecs.DescribeContainerInstancesInput{
+		Cluster:            cluster,
+		ContainerInstances: containerInstances,
+	}
+	ins, err := svc.DescribeContainerInstances(params)
+	if err != nil {
+		return nil, err
+	}
+	insfail := cli.Failure(ins.Failures, err)
+	if insfail != nil {
+		return nil, insfail
+	}
+	var ec2Instances = make([]*string, len(ins.ContainerInstances))
+	for i, v := range ins.ContainerInstances {
+		ec2Instances[i] = v.Ec2InstanceId
+	}
+	ec2client := ec2.New(sess.InitSession())
+	ec2params := &ec2.DescribeInstancesInput{
+		DryRun:      aws.Bool(false),
+		InstanceIds: ec2Instances,
+	}
+	return ec2client.DescribeInstances(ec2params)
+}
+
+func describeOneEc2Instance(svc *ecs.ECS, cluster *string, containerInstance *string) (*ec2.Instance, error) {
+	ins, err := describeEc2Instances(svc, cluster, []*string{containerInstance})
+	if err != nil {
+		return nil, err
+	}
+	if len(ins.Reservations) != 1 {
+		return nil, errors.New("Internal error. Got " + strconv.FormatInt(int64(len(ins.Reservations)), 10) + " instances instead of the required 1")
+	}
+	if len(ins.Reservations[0].Instances) != 1 {
+		return nil, errors.New("Internal error. Got " + strconv.FormatInt(int64(len(ins.Reservations[0].Instances)), 10) + " instances instead of the required 1")
+	}
+	return ins.Reservations[0].Instances[0], nil
+}
 
 func containerDef(family *string, containerPort *int64, hostPort *int64, image *string, cpu *int64, memory *int64, essential bool, links []*string) *ecs.ContainerDefinition {
 	portMapping := &ecs.PortMapping{
@@ -63,10 +106,10 @@ func containerDef(family *string, containerPort *int64, hostPort *int64, image *
 	return &c
 }
 
-func consulDefinition() *ecs.ContainerDefinition {
+func consulDefinition(hostname *string, serverIP *string, advertiseIP *string) *ecs.ContainerDefinition {
 	c := ecs.ContainerDefinition{}
 	c.Name = aws.String("kinja-consul-agent")
-	c.Hostname = aws.String("i-5be8158f")
+	c.Hostname = hostname
 	c.Image = aws.String("progrium/consul")
 	c.Cpu = aws.Int64(156)
 	c.Memory = aws.Int64(256)
@@ -116,20 +159,22 @@ func consulDefinition() *ecs.ContainerDefinition {
 		},
 	}
 
+	session := sess.InitSession()
+
 	c.Command = []*string{
-		aws.String("--join 172.16.41.29"),
+		aws.String("--join " + *serverIP),
 		//aws.String("--advertise  $(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)"),
-		aws.String("--advertise 172.16.34.239"),
-		aws.String("-dc us-east-1a"),
+		aws.String("--advertise " + *advertiseIP),
+		aws.String("-dc " + *session.Config.Region),
 		aws.String("--config-file /etc/consul/consul.json"),
 	}
 	return &c
 }
 
-func registratorDefinition() *ecs.ContainerDefinition {
+func registratorDefinition(hostname *string, advertiseIP *string) *ecs.ContainerDefinition {
 	c := ecs.ContainerDefinition{}
 	c.Name = aws.String("kinja-consul-registrator")
-	c.Hostname = aws.String("i-5be8158f")
+	c.Hostname = hostname
 	c.Image = aws.String("gliderlabs/registrator:latest")
 	c.Cpu = aws.Int64(100)
 	c.Memory = aws.Int64(64)
@@ -144,8 +189,8 @@ func registratorDefinition() *ecs.ContainerDefinition {
 
 	c.Command = []*string{
 		//aws.String("-ip  $(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)"),
-		aws.String("-ip=172.16.34.239"),
-		aws.String("consul://172.16.34.239:8500"),
+		aws.String("-ip=" + *advertiseIP),
+		aws.String("consul://" + *advertiseIP + ":8500"),
 	}
 	return &c
 }
@@ -158,10 +203,6 @@ func Definition(family *string, containerPort *int64, hostPort *int64, image *st
 	}
 	defs := make([]*ecs.ContainerDefinition, size)
 	defs[0] = containerDef(family, containerPort, hostPort, image, cpu, memory, essential, links)
-	if withConsul {
-		defs[1] = consulDefinition()
-		defs[2] = registratorDefinition()
-	}
 	return &ecs.RegisterTaskDefinitionInput{
 		ContainerDefinitions: defs,
 		Family:               family,
@@ -213,6 +254,7 @@ func cliRegisterTaskParams(args []string) *flag.FlagSet {
 	c.BoolVar(&cliEssential, "essential", true, "If the essential parameter of a container is marked as true, the failure of that container will stop the task. If the essential parameter of a container is marked as false, then its failure will not affect the rest of the containers in a task. If this parameter is omitted, a container is assumed to be essential.")
 	c.StringVar(&cliLinks, "links", "", "A list of links for the container. Each link entry should be in the form of `container_name:alias.`")
 	c.BoolVar(&cliWithConsul, "with-consul", false, "Add consul and registrator to the container or not. Default `false`")
+	c.StringVar(&cliConsulServerInstance, "consul-server-instance", "", "The container instance id of the consul server.")
 	return c
 }
 
@@ -232,6 +274,25 @@ func cliRegisterTask(svc *ecs.ECS, args []string) ([]*string, error) {
 		cliEssential,
 		cliWithConsul,
 		links)
+	if cliWithConsul {
+		containerInstances := aws.StringSlice(strings.Split(cliContainerInstance, ","))
+		if len(containerInstances) != 1 {
+			return nil, errors.New("You have to specify exactly one container instance for register task method.")
+		}
+		ins, err := describeOneEc2Instance(svc, &cliClusterName, containerInstances[0])
+		if err != nil {
+			return nil, err
+		}
+		hostname := ins.InstanceId
+		advertise := ins.PublicIpAddress
+		consulIns, err := describeOneEc2Instance(svc, &cliClusterName, &cliConsulServerInstance)
+		if err != nil {
+			return nil, err
+		}
+		consulIP := consulIns.PublicIpAddress
+		params.ContainerDefinitions[1] = consulDefinition(hostname, consulIP, advertise)
+		params.ContainerDefinitions[2] = registratorDefinition(hostname, consulIP)
+	}
 	resp, err := RegisterTask(svc, params)
 	if err != nil {
 		return nil, err
@@ -446,28 +507,7 @@ func cliStartWait(svc *ecs.ECS, args []string) ([]*string, error) {
 	for k := range resp.Tasks {
 		ret[k] = resp.Tasks[k].TaskArn
 	}
-	params := &ecs.DescribeContainerInstancesInput{
-		Cluster:            cli.String(cliClusterName),
-		ContainerInstances: containerInstances,
-	}
-	ins, inserr := svc.DescribeContainerInstances(params)
-	if inserr != nil {
-		return ret, inserr
-	}
-	insfail := cli.Failure(ins.Failures, err)
-	if insfail != nil {
-		return nil, insfail
-	}
-	var ec2Instances = make([]*string, len(ins.ContainerInstances))
-	for i, v := range ins.ContainerInstances {
-		ec2Instances[i] = v.Ec2InstanceId
-	}
-	ec2client := ec2.New(nil)
-	ec2params := &ec2.DescribeInstancesInput{
-		DryRun:      aws.Bool(false),
-		InstanceIds: ec2Instances,
-	}
-	dns, dnserr := ec2client.DescribeInstances(ec2params)
+	dns, dnserr := describeEc2Instances(svc, cli.String(cliClusterName), containerInstances)
 	if dnserr != nil {
 		return ret, dnserr
 	}
