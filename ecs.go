@@ -4,13 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/defaults"
 	"github.com/gawkermedia/ecs/cluster"
 	"github.com/gawkermedia/ecs/task"
 )
-
-var az = "us-east-1"
 
 func printHelp() {
 	fmt.Fprintf(os.Stdout, "Usage: "+os.Args[0]+" command [parameters]\n")
@@ -21,7 +17,6 @@ func printHelp() {
 // ecs cmd [args...]
 // ecs help cmd
 func main() {
-	defaults.DefaultConfig.Region = aws.String(az)
 
 	cmd := "help"
 	if len(os.Args) > 1 {

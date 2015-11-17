@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go/service/ecs"
+	"github.com/gawkermedia/ecs/sess"
 )
 
 type (
@@ -65,7 +66,7 @@ func PrintHelp(cmd string, commands map[string]Command, args []string) {
 
 // Run Main entry point, which runs a command or display a help message.
 func Run(command string, commands map[string]Command, args []string) ([]*string, error) {
-	svc := ecs.New(nil)
+	svc := ecs.New(sess.InitSession())
 
 	var input string
 	if len(args) > 0 {
