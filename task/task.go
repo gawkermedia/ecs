@@ -38,6 +38,7 @@ var cliEssential bool
 var cliLinks string
 var cliWithConsul bool
 var cliConsulServerInstance string
+var cliTargetInstance string
 
 // describeEc2Instances Describes EC2 instances by container istance ID
 func describeEc2Instances(svc *ecs.ECS, cluster *string, containerInstances []*string) (*ec2.DescribeInstancesOutput, error) {
@@ -255,6 +256,7 @@ func cliRegisterTaskParams(args []string) *flag.FlagSet {
 	c.StringVar(&cliLinks, "links", "", "A list of links for the container. Each link entry should be in the form of `container_name:alias.`")
 	c.BoolVar(&cliWithConsul, "with-consul", false, "Add consul and registrator to the container or not. Default `false`")
 	c.StringVar(&cliConsulServerInstance, "consul-server-instance", "", "The container instance id of the consul server.")
+	c.StringVar(&cliTargetInstance, "target-instance", "", "The target container instance id")
 	return c
 }
 
@@ -275,11 +277,7 @@ func cliRegisterTask(svc *ecs.ECS, args []string) ([]*string, error) {
 		cliWithConsul,
 		links)
 	if cliWithConsul {
-		containerInstances := aws.StringSlice(strings.Split(cliContainerInstance, ","))
-		if len(containerInstances) != 1 {
-			return nil, errors.New("You have to specify exactly one container instance for register task method.")
-		}
-		ins, err := describeOneEc2Instance(svc, &cliClusterName, containerInstances[0])
+		ins, err := describeOneEc2Instance(svc, &cliClusterName, &cliTargetInstance)
 		if err != nil {
 			return nil, err
 		}
